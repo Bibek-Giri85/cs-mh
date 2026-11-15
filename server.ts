@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { createServer as createViteServer } from 'vite';
 import {
   deleteBirthdayOffer,
@@ -18,7 +19,7 @@ import {
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
-    const allowedOrigins = [
+  const allowedOrigins = [
     'https://mothers-hut-frontend.vercel.app',
     process.env.FRONTEND_URL,
   ].filter(Boolean);
@@ -61,10 +62,25 @@ async function startServer() {
     });
   });
 
-  // Full Dashboard Snapshot
-  app.get('/api/dashboard', (_req, res) => {
+  // Full Dashboard Snapshot (gzip-compressed when supported to speed up initial load)
+  app.get('/api/dashboard', (req, res) => {
     try {
-      res.json(getDashboardSnapshot());
+      const snapshot = getDashboardSnapshot();
+      const acceptEncoding = String(req.headers['accept-encoding'] || '');
+      if (acceptEncoding.includes('gzip')) {
+        const payload = Buffer.from(JSON.stringify(snapshot));
+        zlib.gzip(payload, (err, compressed) => {
+          if (err) {
+            return res.json(snapshot);
+          }
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Vary', 'Accept-Encoding');
+          return res.send(compressed);
+        });
+        return;
+      }
+      res.json(snapshot);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -186,7 +202,16 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        maxAge: '7d',
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

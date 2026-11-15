@@ -23,8 +23,8 @@ export function AlertsPage({
 }: AlertsPageProps) {
   const [search, setSearch] = useState('');
   const [clusterFilter, setClusterFilter] = useState('all');
-  const [sentFilter, setSentFilter] = useState('all');
-  const [flagFilter, setFlagFilter] = useState('HIGH_PRIORITY_ALERT');
+  const [sentFilter, setSentFilter] = useState<'all' | 'unsent' | 'sent'>('all');
+  const [onlyHighAlerts, setOnlyHighAlerts] = useState(true);
   const [alertView, setAlertView] = useState<'tiles' | 'list'>('tiles');
   const [page, setPage] = useState(1);
 
@@ -51,18 +51,31 @@ export function AlertsPage({
     [snapshot.contacted_alert_ids]
   );
 
-  const filtered = useMemo(() => {
+  const baseMatched = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = snapshot.customers.filter((c) => {
-      if (flagFilter !== 'all' && c.churn_alert_flag !== flagFilter) return false;
+    return snapshot.customers.filter((c) => {
+      if (onlyHighAlerts && c.churn_alert_flag !== 'HIGH_PRIORITY_ALERT') return false;
       if (clusterFilter !== 'all' && String(c.cluster_id) !== clusterFilter) return false;
-      const isSent = contactedSet.has(c.customer_id);
-      if (sentFilter === 'unsent' && isSent) return false;
-      if (sentFilter === 'sent' && !isSent) return false;
       if (q) {
         const hay = `${c.customer_name} ${c.contact_no} ${c.customer_id} ${c.most_ordered_dish || ''} ${c.area}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
+      return true;
+    });
+  }, [snapshot.customers, onlyHighAlerts, clusterFilter, search]);
+
+  const unsentGuests = useMemo(
+    () => baseMatched.filter((c) => !contactedSet.has(c.customer_id)),
+    [baseMatched, contactedSet]
+  );
+
+  const sentCountInBase = baseMatched.length - unsentGuests.length;
+
+  const filtered = useMemo(() => {
+    const list = baseMatched.filter((c) => {
+      const isSent = contactedSet.has(c.customer_id);
+      if (sentFilter === 'unsent') return !isSent;
+      if (sentFilter === 'sent') return isSent;
       return true;
     });
 
@@ -73,11 +86,11 @@ export function AlertsPage({
       return b.days_since_last_visit - a.days_since_last_visit;
     });
     return list;
-  }, [snapshot.customers, flagFilter, clusterFilter, sentFilter, search, contactedSet]);
+  }, [baseMatched, sentFilter, contactedSet]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, clusterFilter, sentFilter, flagFilter]);
+  }, [search, clusterFilter, sentFilter, onlyHighAlerts]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ALERT_PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -86,11 +99,6 @@ export function AlertsPage({
     return filtered.slice(start, start + ALERT_PAGE_SIZE);
   }, [filtered, safePage]);
 
-  const unsentGuests = useMemo(
-    () => filtered.filter((c) => !contactedSet.has(c.customer_id)),
-    [filtered, contactedSet]
-  );
-  const sentCountInView = filtered.length - unsentGuests.length;
   const riskBaseList = sentFilter === 'sent' ? filtered : unsentGuests;
   const totalPotentialRevenue = riskBaseList.reduce(
     (acc, c) => acc + (Number(c.total_spend_inr) || 0),
@@ -103,7 +111,7 @@ export function AlertsPage({
         <div>
           <h1>Guest Alerts</h1>
           <p className="hero-subtitle">
-            Click any guest to open their interactive profile, or send personalized offers to all unsent guests at once.
+            Click any guest to send a personalized SMS, or message all unsent guests in one click.
           </p>
         </div>
 
@@ -126,7 +134,7 @@ export function AlertsPage({
           </span>
           <div className="kpi-col">
             <span className="kpi-label kpi-label-red">
-              POTENTIAL REVENUE {revenueUnlocked ? `(${secondsLeft}s)` : ''}
+              {revenueUnlocked ? `POTENTIAL REVENUE (${secondsLeft}s)` : 'POTENTIAL REVENUE'}
             </span>
             <strong className="kpi-val text-red-dark">
               {revenueUnlocked ? formatINR(totalPotentialRevenue) : '* ₹'}
@@ -135,7 +143,7 @@ export function AlertsPage({
           <div className="alert-kpi-divider" />
           <div className="kpi-col">
             <span className="kpi-label">AT-RISK GUESTS</span>
-            <strong className="kpi-val">{filtered.length.toLocaleString()}</strong>
+            <strong className="kpi-val">{baseMatched.length.toLocaleString()}</strong>
           </div>
           <div className="alert-kpi-divider" />
           <div className="kpi-col">
@@ -145,13 +153,13 @@ export function AlertsPage({
         </button>
       </div>
 
-      {/* Unified Filter + View Switcher + One-Click Send All */}
+      {/* Simplified Toolbar */}
       <div className="surface-card alert-toolbar">
         <div className="alert-filter-bar">
           <input
             type="search"
-            className="field-input"
-            placeholder="Search name, phone, ID, dish..."
+            className="field-input alert-search-input"
+            placeholder="Search name, phone, or dish..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -167,30 +175,20 @@ export function AlertsPage({
               </option>
             ))}
           </select>
-          <select
-            className="field-input"
-            value={sentFilter}
-            onChange={(e) => setSentFilter(e.target.value)}
+          <button
+            type="button"
+            className={onlyHighAlerts ? 'btn btn-sm btn-brand' : 'btn btn-sm btn-outline'}
+            onClick={() => setOnlyHighAlerts((v) => !v)}
           >
-            <option value="all">All Status</option>
-            <option value="unsent">Unsent Only</option>
-            <option value="sent">Sent Only</option>
-          </select>
-          <select
-            className="field-input"
-            value={flagFilter}
-            onChange={(e) => setFlagFilter(e.target.value)}
-          >
-            <option value="HIGH_PRIORITY_ALERT">High Alerts Only</option>
-            <option value="all">All Guests</option>
-          </select>
+            {onlyHighAlerts ? 'High Alerts Only' : 'Showing All Guests'}
+          </button>
         </div>
 
         <div className="alert-right-controls">
           <div className="view-toggle-group" role="group" aria-label="View format">
             <button
               type="button"
-              className={`view-mode-btn ${alertView === 'tiles' ? 'active' : ''}`}
+              className={alertView === 'tiles' ? 'view-mode-btn active' : 'view-mode-btn'}
               onClick={() => setAlertView('tiles')}
             >
               <LayoutGrid size={13} />
@@ -198,7 +196,7 @@ export function AlertsPage({
             </button>
             <button
               type="button"
-              className={`view-mode-btn ${alertView === 'list' ? 'active' : ''}`}
+              className={alertView === 'list' ? 'view-mode-btn active' : 'view-mode-btn'}
               onClick={() => setAlertView('list')}
             >
               <List size={13} />
@@ -208,7 +206,7 @@ export function AlertsPage({
 
           <button
             type="button"
-            className={`btn btn-sm ${unsentGuests.length > 0 ? 'btn-brand' : 'btn-emerald'}`}
+            className={unsentGuests.length > 0 ? 'btn btn-sm btn-brand' : 'btn btn-sm btn-emerald'}
             disabled={unsentGuests.length === 0}
             onClick={() => onBulkSendAlerts(unsentGuests)}
           >
@@ -218,23 +216,42 @@ export function AlertsPage({
         </div>
       </div>
 
-      <div className="alert-summary-chips">
-        <span className="summary-chip">
-          Showing <strong>{filtered.length.toLocaleString()}</strong> guests
-        </span>
-        <span className="summary-chip">
-          Unsent: <strong>{unsentGuests.length.toLocaleString()}</strong>
-        </span>
-        <span className="summary-chip">
-          Sent: <strong className="text-green">{sentCountInView.toLocaleString()}</strong>
-        </span>
+      {/* Easy 1-Click Status Tabs */}
+      <div className="alert-quick-tabs" role="tablist" aria-label="Filter by message status">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sentFilter === 'all'}
+          className={sentFilter === 'all' ? 'alert-quick-tab is-active' : 'alert-quick-tab'}
+          onClick={() => setSentFilter('all')}
+        >
+          All Guests <span>{baseMatched.length.toLocaleString()}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sentFilter === 'unsent'}
+          className={sentFilter === 'unsent' ? 'alert-quick-tab is-active' : 'alert-quick-tab'}
+          onClick={() => setSentFilter('unsent')}
+        >
+          Needs Message <span>{unsentGuests.length.toLocaleString()}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sentFilter === 'sent'}
+          className={sentFilter === 'sent' ? 'alert-quick-tab is-active' : 'alert-quick-tab'}
+          onClick={() => setSentFilter('sent')}
+        >
+          Sent <span className="is-sent-count">{sentCountInBase.toLocaleString()}</span>
+        </button>
       </div>
 
-      <div className={`alert-cards-grid ${alertView === 'list' ? 'is-list-view' : ''}`}>
+      <div className={alertView === 'list' ? 'alert-cards-grid is-list-view' : 'alert-cards-grid'}>
         {visibleItems.length === 0 ? (
           <div
             className="surface-card"
-            style={{ padding: 26, gridColumn: '1 / -1', textAlign: 'center', color: '#64748b' }}
+            style={{ padding: 26, gridColumn: '1 / -1', textAlign: 'center', color: 'var(--text-muted)' }}
           >
             No matching guests found for this filter.
           </div>
@@ -245,7 +262,7 @@ export function AlertsPage({
             return (
               <div
                 key={c.customer_id}
-                className={`alert-customer-card ${isSent ? 'is-sent' : ''}`}
+                className={isSent ? 'alert-customer-card is-sent' : 'alert-customer-card'}
                 onClick={() => onOpenGuestModal(c)}
               >
                 <div className="ac-top">
@@ -276,7 +293,7 @@ export function AlertsPage({
                   </span>
                 </div>
 
-                <span className="list-action-hint">{isSent ? 'View →' : 'Open →'}</span>
+                <span className="list-action-hint">{isSent ? 'View →' : 'Send SMS →'}</span>
               </div>
             );
           })
@@ -285,9 +302,9 @@ export function AlertsPage({
 
       {totalPages > 1 && (
         <div className="surface-card mt-4 px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap text-xs">
-          <span className="text-slate-600">
-            Page <strong className="text-zinc-900">{safePage}</strong> of{' '}
-            <strong className="text-zinc-900">{totalPages}</strong> ({filtered.length.toLocaleString()} guests)
+          <span style={{ color: 'var(--text-muted)' }}>
+            Page <strong style={{ color: 'var(--text-dark)' }}>{safePage}</strong> of{' '}
+            <strong style={{ color: 'var(--text-dark)' }}>{totalPages}</strong> ({filtered.length.toLocaleString()} guests)
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -333,14 +350,16 @@ export function AlertsPage({
               }
             }}
           >
-            <h3 className="text-sm font-semibold text-zinc-900 mb-0.5">Enter Password</h3>
-            <p className="text-xs text-slate-500 mb-3">
+            <h3 className="text-sm font-semibold mb-0.5" style={{ color: 'var(--text-dark)' }}>
+              Enter Password
+            </h3>
+            <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
               Enter manager password to view revenue (auto-hides in 10s).
             </p>
             <input
               type="password"
               autoFocus
-              className="w-full text-sm tracking-widest px-3 py-2 border border-slate-300 rounded-lg outline-none mb-1.5"
+              className="field-input w-full text-sm tracking-widest mb-1.5"
               placeholder="••••"
               value={pinInput}
               onChange={(e) => setPinInput(e.target.value)}

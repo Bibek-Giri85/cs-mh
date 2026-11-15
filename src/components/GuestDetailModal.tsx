@@ -1,27 +1,11 @@
-
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Legend,
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts';
-import { Crown, Lightbulb, Sparkles } from 'lucide-react';
+import { Lightbulb, Sparkles } from 'lucide-react';
 import type { CustomerRecord } from '../types';
 import { formatINR, formatPhone, getInitials, getRealisticOffer } from '../utils/formatters';
 import {
   buildPlainEnglishReason,
-  buildRadarComparisonData,
   buildStaffHospitalityTip,
-  buildStatComparisons,
   CLUSTER_COLORS,
-  computeGuestClusterMatch,
-  computePathToVip,
-  type RadarDatum,
 } from '../utils/guestInsights';
 import { HighlightedMessage } from './MessageHighlighter';
 
@@ -39,34 +23,6 @@ interface GuestDetailModalProps {
     language: 'en' | 'bn';
     coupon: string | null;
   }) => void;
-}
-
-function RadarCustomTooltip({
-  active,
-  payload,
-  clusterName,
-}: {
-  active?: boolean;
-  payload?: Array<{ payload?: RadarDatum }>;
-  clusterName: string;
-}) {
-  if (!active || !payload || payload.length === 0) return null;
-  const row = payload[0]?.payload;
-  if (!row) return null;
-
-  return (
-    <div className="cluster-map-tooltip">
-      <div className="text-xs font-semibold text-zinc-900 mb-1">{row.metric}</div>
-      <div className="text-[11px] text-slate-600 space-y-0.5">
-        <div>
-          This Guest: <strong className="text-zinc-900">{row.guestRaw}</strong> ({row.guestScore}/100)
-        </div>
-        <div>
-          {clusterName} Avg: <strong className="text-zinc-900">{row.groupRaw}</strong> ({row.groupAvgScore}/100)
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function GuestDetailModal({
@@ -125,11 +81,7 @@ export function GuestDetailModal({
     if (!customer) return null;
     const pool = allCustomers.length > 0 ? allCustomers : [customer];
     return {
-      match: computeGuestClusterMatch(customer, pool),
       reason: buildPlainEnglishReason(customer, pool),
-      comparisons: buildStatComparisons(customer, pool),
-      vipPath: computePathToVip(customer, pool),
-      radarData: buildRadarComparisonData(customer, pool),
       staffTip: buildStaffHospitalityTip(customer),
     };
   }, [customer, allCustomers]);
@@ -140,17 +92,6 @@ export function GuestDetailModal({
   const offer = getRealisticOffer(customer);
   const activeMessage = customText || (modalLang === 'bn' ? offer.messageBn : offer.messageEn);
   const clusterPalette = CLUSTER_COLORS[customer.cluster_id] || CLUSTER_COLORS[0];
-
-  const cats = [
-    { label: 'Chicken', val: customer.chicken_orders },
-    { label: 'Veg', val: customer.veg_orders },
-    { label: 'Mutton', val: customer.mutton_orders },
-    { label: 'Seafood', val: customer.seafood_orders },
-    { label: 'Biryani & Rice', val: customer.biryani_rice_orders },
-    { label: 'Chinese & Fast Food', val: customer.chinese_fastfood_orders },
-    { label: 'Dessert & Beverage', val: customer.dessert_beverage_orders },
-  ];
-  const maxVal = Math.max(...cats.map((d) => d.val), 1);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -188,7 +129,7 @@ export function GuestDetailModal({
           &times;
         </button>
 
-        {/* Header with Group Match Badge */}
+        {/* Clean Header */}
         <div className="modal-header">
           <div className="modal-avatar" style={{ backgroundColor: clusterPalette.main }}>
             {getInitials(customer.customer_name)}
@@ -209,17 +150,10 @@ export function GuestDetailModal({
               >
                 {customer.cluster_name}
               </span>
-              <span
-                className={`group-match-badge ${
-                  insights.match.isCoreMember ? 'is-core' : 'is-border'
-                }`}
-              >
-                {insights.match.badgeText}
-              </span>
               <button
                 type="button"
                 className="btn btn-outline btn-sm"
-                style={{ padding: '3px 10px', fontSize: '0.7rem' }}
+                style={{ padding: '4px 11px', fontSize: '0.72rem' }}
                 onClick={() => setIsEditingProfile((v) => !v)}
               >
                 {isEditingProfile ? 'Cancel Edit' : '✎ Edit Details'}
@@ -240,25 +174,14 @@ export function GuestDetailModal({
           </div>
         </div>
 
-        {/* Plain-English Reason */}
-        <div className="mb-3.5 rounded-xl border border-slate-200 bg-slate-50/90 px-3.5 py-2.5 flex items-center gap-2.5 text-xs text-zinc-800">
-          <Sparkles size={15} className="shrink-0" style={{ color: clusterPalette.main }} />
-          <div>
-            <strong className="text-zinc-900">Why this group: </strong>
-            <span>{insights.reason}</span>
-          </div>
-        </div>
-
+        {/* Edit Details Form */}
         {isEditingProfile && (
-          <form
-            onSubmit={handleSaveProfile}
-            className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3 text-xs"
-          >
+          <form onSubmit={handleSaveProfile} className="guest-edit-form">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <strong className="text-zinc-900">Update Guest Details</strong>
-              <span className="text-slate-600">
+              <strong style={{ color: 'var(--text-dark)' }}>Update Guest Details</strong>
+              <span style={{ color: 'var(--text-muted)' }}>
                 Auto Avg / Visit Preview:{' '}
-                <strong className="text-zinc-900">
+                <strong style={{ color: 'var(--text-dark)' }}>
                   {formatINR(
                     Math.round(
                       Math.max(0, Number(editTotalSpend) || 0) /
@@ -270,7 +193,7 @@ export function GuestDetailModal({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Name</label>
+                <label className="guest-field-label">Name</label>
                 <input
                   required
                   type="text"
@@ -280,7 +203,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Contact</label>
+                <label className="guest-field-label">Contact</label>
                 <input
                   required
                   type="text"
@@ -290,7 +213,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Age</label>
+                <label className="guest-field-label">Age</label>
                 <input
                   type="number"
                   className="field-input w-full"
@@ -299,7 +222,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">DOB</label>
+                <label className="guest-field-label">DOB</label>
                 <input
                   type="date"
                   className="field-input w-full"
@@ -308,7 +231,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Total Visits</label>
+                <label className="guest-field-label">Total Visits</label>
                 <input
                   type="number"
                   min={1}
@@ -318,7 +241,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Total Spend (₹)</label>
+                <label className="guest-field-label">Total Spend (₹)</label>
                 <input
                   type="number"
                   min={0}
@@ -328,7 +251,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Favourite Dish</label>
+                <label className="guest-field-label">Favourite Dish</label>
                 <input
                   type="text"
                   className="field-input w-full"
@@ -337,7 +260,7 @@ export function GuestDetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">Rating (1–5)</label>
+                <label className="guest-field-label">Rating (1–5)</label>
                 <input
                   type="number"
                   step="0.1"
@@ -365,148 +288,65 @@ export function GuestDetailModal({
         )}
 
         <div className="modal-split-body">
-          {/* LEFT COLUMN */}
+          {/* LEFT COLUMN: Simple Guest Summary & Preferences (No charts/bars) */}
           <div className="space-y-3">
-            {/* Stats vs Restaurant Average */}
             <div className="modal-stats-grid" style={{ marginBottom: 0 }}>
-              {insights.comparisons.map((item) => (
-                <div key={item.key} className="stat-tile">
-                  <div className="flex items-center justify-between gap-1 mb-0.5">
-                    <span className="tile-label">{item.label}</span>
-                    <span className={`comp-pill tone-${item.pillTone}`}>{item.pillText}</span>
-                  </div>
-                  <strong className="tile-val">{item.formattedValue}</strong>
-                  <small className="tile-sub">Rest. avg: {item.formattedAvg}</small>
-                </div>
-              ))}
-            </div>
-
-            {/* Path to VIP Meter */}
-            <div className={`vip-meter-box ${insights.vipPath.isVip ? 'is-vip' : ''}`}>
-              {insights.vipPath.isVip ? (
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="vip-gold-badge">
-                      <Crown size={13} />
-                      VIP Status Secured
-                    </span>
-                    <span className="text-xs text-amber-900 font-medium">
-                      Top-tier Premium Customer
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-amber-800">
-                    Last visit: {customer.days_since_last_visit}d ago
-                  </span>
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between gap-2 text-xs mb-1.5">
-                    <span className="font-semibold text-zinc-900 flex items-center gap-1.5">
-                      <Crown size={13} className="text-amber-600" />
-                      Path to VIP
-                    </span>
-                    <span className="font-semibold" style={{ color: 'var(--brand-hover)' }}>
-                      {insights.vipPath.labelText}
-                    </span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: `${insights.vipPath.progressPct}%`,
-                        background: 'linear-gradient(90deg, #ab6446 0%, #0284c7 100%)',
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Me vs. My Group Radar Chart */}
-            <div className="modal-sub-panel radar-panel">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <h3 style={{ marginBottom: 0 }}>Me vs. My Group</h3>
-                <span className="text-[11px] text-slate-500">Normalized (0–100)</span>
+              <div className="stat-tile">
+                <span className="tile-label">Total Visits</span>
+                <strong className="tile-val">{customer.total_visits}</strong>
+                <small className="tile-sub">Last: {customer.days_since_last_visit}d ago</small>
               </div>
-              <div style={{ width: '100%', height: 215 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart cx="50%" cy="50%" outerRadius="68%" data={insights.radarData}>
-                    <PolarGrid stroke="#e2e8f0" />
-                    <PolarAngleAxis
-                      dataKey="metric"
-                      tick={{ fontSize: 10.5, fill: '#475569', fontWeight: 500 }}
-                    />
-                    <PolarRadiusAxis
-                      angle={30}
-                      domain={[0, 100]}
-                      tick={false}
-                      axisLine={false}
-                    />
-                    <Radar
-                      name="This Guest"
-                      dataKey="guestScore"
-                      stroke={clusterPalette.main}
-                      fill={clusterPalette.main}
-                      fillOpacity={0.3}
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    />
-                    <Radar
-                      name={`${customer.cluster_name} Avg`}
-                      dataKey="groupAvgScore"
-                      stroke="#64748b"
-                      fill="#94a3b8"
-                      fillOpacity={0.14}
-                      strokeDasharray="4 3"
-                      strokeWidth={1.6}
-                      isAnimationActive={false}
-                    />
-                    <Tooltip
-                      content={<RadarCustomTooltip clusterName={customer.cluster_name} />}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 2 }} />
-                  </RadarChart>
-                </ResponsiveContainer>
+              <div className="stat-tile">
+                <span className="tile-label">Avg / Visit</span>
+                <strong className="tile-val">{formatINR(customer.avg_spend_per_visit_inr)}</strong>
+                <small className="tile-sub">Party avg: {customer.avg_group_size}</small>
+              </div>
+              <div className="stat-tile">
+                <span className="tile-label">Total Spend</span>
+                <strong className="tile-val">{formatINR(customer.total_spend_inr)}</strong>
+                <small className="tile-sub">
+                  Rating:{' '}
+                  {customer.avg_rating_given !== null && customer.avg_rating_given !== undefined
+                    ? `${customer.avg_rating_given} / 5`
+                    : 'N/A'}
+                </small>
               </div>
             </div>
 
-            {/* Favorite Food Categories */}
             <div className="modal-sub-panel">
-              <h3>Favorite Food Categories</h3>
-              <div className="cat-bars-two-col">
-                {cats
-                  .filter((d) => d.val > 0)
-                  .slice(0, 6)
-                  .map((d) => (
-                    <div key={d.label} className="cat-bar-item">
-                      <div className="cat-bar-top">
-                        <span>{d.label}</span>
-                        <span>{d.val}</span>
-                      </div>
-                      <div className="cat-bar-track">
-                        <div
-                          className="cat-bar-fill"
-                          style={{ width: `${Math.round((d.val / maxVal) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-              </div>
-              <div className="mt-3 pt-2.5 border-t border-slate-100 text-xs text-slate-600 flex justify-between flex-wrap gap-2">
-                <span>
-                  Most Ordered Dish:{' '}
-                  <strong className="text-zinc-900">
-                    {customer.most_ordered_dish || 'Not recorded yet'}
+              <h3>Dining Summary</h3>
+              <div className="guest-pref-list">
+                <div className="guest-pref-row">
+                  <span>Favourite Dish</span>
+                  <strong>{customer.most_ordered_dish || 'Not recorded yet'}</strong>
+                </div>
+                <div className="guest-pref-row">
+                  <span>Top Category</span>
+                  <strong>{customer.top_food_category || 'General'}</strong>
+                </div>
+                <div className="guest-pref-row">
+                  <span>Preferred Time</span>
+                  <strong>
+                    {customer.preferred_meal_time} • {customer.preferred_day_type}
                   </strong>
-                </span>
-                <span>
-                  Last Visited: <strong className="text-zinc-900">{customer.days_since_last_visit}d ago</strong>
-                </span>
+                </div>
+                <div className="guest-pref-row">
+                  <span>Discount Usage</span>
+                  <strong>{Math.round((customer.discount_rate || 0) * 100)}% of visits</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="guest-reason-box">
+              <Sparkles size={15} className="shrink-0 mt-0.5" style={{ color: clusterPalette.main }} />
+              <div>
+                <strong>Why this group: </strong>
+                <span>{insights.reason}</span>
               </div>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Staff Tip + Recommended Offer + SMS Composer */}
+          {/* RIGHT COLUMN: Staff Tip + Recommended Offer + Easy SMS Composer */}
           <div className="modal-right-col">
             <div className="staff-tip-box">
               <div className="flex items-start gap-2.5">
@@ -514,10 +354,8 @@ export function GuestDetailModal({
                   <Lightbulb size={15} />
                 </span>
                 <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                    STAFF HOSPITALITY TIP
-                  </span>
-                  <p className="text-xs text-zinc-800 mt-0.5 leading-relaxed">
+                  <span className="staff-tip-eyebrow">STAFF HOSPITALITY TIP</span>
+                  <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--text-dark)' }}>
                     {insights.staffTip}
                   </p>
                 </div>
@@ -542,7 +380,7 @@ export function GuestDetailModal({
             <div className="modal-send-panel">
               <div className="modal-send-top">
                 <div>
-                  <h3>Personalized SMS</h3>
+                  <h3>Send SMS</h3>
                   <span className="send-to-label">
                     To: {customer.customer_name} ({formatPhone(customer.contact_no)})
                   </span>
@@ -568,7 +406,7 @@ export function GuestDetailModal({
                       setIsEditing(false);
                     }}
                   >
-                    বাংলা (Bengali)
+                    বাংলা
                   </button>
                 </div>
               </div>
@@ -588,7 +426,7 @@ export function GuestDetailModal({
 
               <div className="modal-send-bottom">
                 <span className="sent-status-note">
-                  {isSent ? '✓ SMS sent' : 'SMS Channel · Ready'}
+                  {isSent ? '✓ SMS sent' : 'Ready to send'}
                 </span>
                 <div className="modal-send-actions">
                   <button
@@ -603,7 +441,7 @@ export function GuestDetailModal({
                       }
                     }}
                   >
-                    {isEditing ? '✓ Done' : '✎ Customize'}
+                    {isEditing ? '✓ Done' : '✎ Edit Text'}
                   </button>
                   <button
                     type="button"
@@ -617,7 +455,7 @@ export function GuestDetailModal({
                       })
                     }
                   >
-                    Send Personalized SMS (EN / বাংলা)
+                    Send SMS
                   </button>
                 </div>
               </div>

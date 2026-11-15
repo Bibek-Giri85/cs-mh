@@ -1,16 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
-import { AlertsPage } from './components/AlertsPage';
-import { BirthdayOffersModal } from './components/BirthdayOffersModal';
-import { BirthdayPage } from './components/BirthdayPage';
-import { CustomersPage } from './components/CustomersPage';
-import { GuestDetailModal } from './components/GuestDetailModal';
-import { GuestGroupsStudioPage } from './components/GuestGroupsStudioPage';
-import { HistoryPage } from './components/HistoryPage';
 import { Navbar } from './components/Navbar';
 import { OverviewPage } from './components/OverviewPage';
-import { SegmentationPage } from './components/SegmentationPage';
-import { SimulatedSmsModal } from './components/SimulatedSmsModal';
 import { api } from './services/api';
 import type {
   BirthdayOffer,
@@ -22,27 +13,86 @@ import type {
 } from './types';
 import { CLUSTER_CONFIG } from './utils/formatters';
 
+const SNAPSHOT_CACHE_KEY = 'mh_dashboard_snapshot_v1';
+
+const AlertsPage = lazy(() =>
+  import('./components/AlertsPage').then((m) => ({ default: m.AlertsPage }))
+);
+const BirthdayOffersModal = lazy(() =>
+  import('./components/BirthdayOffersModal').then((m) => ({ default: m.BirthdayOffersModal }))
+);
+const BirthdayPage = lazy(() =>
+  import('./components/BirthdayPage').then((m) => ({ default: m.BirthdayPage }))
+);
+const CustomersPage = lazy(() =>
+  import('./components/CustomersPage').then((m) => ({ default: m.CustomersPage }))
+);
+const GuestDetailModal = lazy(() =>
+  import('./components/GuestDetailModal').then((m) => ({ default: m.GuestDetailModal }))
+);
+const GuestGroupsStudioPage = lazy(() =>
+  import('./components/GuestGroupsStudioPage').then((m) => ({ default: m.GuestGroupsStudioPage }))
+);
+const HistoryPage = lazy(() =>
+  import('./components/HistoryPage').then((m) => ({ default: m.HistoryPage }))
+);
+const SegmentationPage = lazy(() =>
+  import('./components/SegmentationPage').then((m) => ({ default: m.SegmentationPage }))
+);
+const SimulatedSmsModal = lazy(() =>
+  import('./components/SimulatedSmsModal').then((m) => ({ default: m.SimulatedSmsModal }))
+);
+
+function readCachedSnapshot(): DashboardSnapshot | null {
+  try {
+    const raw = sessionStorage.getItem(SNAPSHOT_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DashboardSnapshot;
+    if (parsed?.metrics && Array.isArray(parsed?.customers) && Array.isArray(parsed?.cluster_profiles)) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSnapshot(data: DashboardSnapshot) {
+  try {
+    sessionStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    // Ignore storage quota issues cleanly
+  }
+}
+
+function TabLoadingFallback() {
+  return (
+    <div className="mh-skeleton-grid tab-animate" aria-busy="true" aria-label="Loading workspace section">
+      <div className="mh-skeleton-card" />
+      <div className="mh-skeleton-card" />
+    </div>
+  );
+}
+
 export default function App() {
-  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialCache] = useState<DashboardSnapshot | null>(() => readCachedSnapshot());
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(initialCache);
+  const [loading, setLoading] = useState<boolean>(initialCache === null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
   const [selectedClusterId, setSelectedClusterId] = useState<number>(0);
 
-  // Modals & Cross-tab selections
   const [inspectedCustomer, setInspectedCustomer] = useState<CustomerRecord | null>(null);
   const [selectedBirthdayCustomer, setSelectedBirthdayCustomer] =
     useState<EnrichedBirthdayCustomer | null>(null);
   const [showOffersModal, setShowOffersModal] = useState(false);
 
-  // SMS Dispatch Modal state
   const [smsModalOpen, setSmsModalOpen] = useState(false);
   const [isSendingSms, setIsSendingSms] = useState(false);
   const [dispatchedCampaign, setDispatchedCampaign] = useState<CampaignRecord | null>(null);
   const [smsError, setSmsError] = useState<string | null>(null);
 
-  // Toast feedback
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -63,6 +113,7 @@ export default function App() {
         throw new Error('Dashboard metrics unavailable.');
       }
       setSnapshot(data);
+      writeCachedSnapshot(data);
       setLoadError(null);
       setSelectedBirthdayCustomer((prev) => {
         if (!prev) return null;
@@ -82,12 +133,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void fetchSnapshot(false);
+    void fetchSnapshot(initialCache !== null);
     const interval = setInterval(() => {
-      void fetchSnapshot(true);
-    }, 5000);
+      if (!document.hidden) {
+        void fetchSnapshot(true);
+      }
+    }, 30000);
     return () => clearInterval(interval);
-  }, [fetchSnapshot]);
+  }, [fetchSnapshot, initialCache]);
 
   const dispatchSmsCampaign = useCallback(
     async (payload: {
@@ -113,6 +166,7 @@ export default function App() {
         const [result] = await Promise.all([api.sendSmsCampaign(payload), minAnimDelay]);
         if (result?.snapshot?.metrics) {
           setSnapshot(result.snapshot);
+          writeCachedSnapshot(result.snapshot);
         }
         setDispatchedCampaign(result.campaign);
         setSelectedBirthdayCustomer((prev) => {
@@ -146,6 +200,7 @@ export default function App() {
       const res = await api.upsertCustomer(payload);
       if (res?.snapshot?.metrics) {
         setSnapshot(res.snapshot);
+        writeCachedSnapshot(res.snapshot);
       }
       setInspectedCustomer((prev) =>
         prev && prev.customer_id === res.customer.customer_id ? res.customer : prev
@@ -172,6 +227,7 @@ export default function App() {
       const res = await api.upsertBirthdayOffer(payload);
       if (res?.snapshot?.metrics) {
         setSnapshot(res.snapshot);
+        writeCachedSnapshot(res.snapshot);
       }
       showToast(`Birthday offer "${res.offer.title}" saved.`);
     },
@@ -183,6 +239,7 @@ export default function App() {
       const res = await api.deleteBirthdayOffer(offerId);
       if (res?.snapshot?.metrics) {
         setSnapshot(res.snapshot);
+        writeCachedSnapshot(res.snapshot);
       }
       showToast('Birthday offer removed.');
     },
@@ -237,20 +294,32 @@ export default function App() {
       data-cluster={themeClusterId !== undefined ? String(themeClusterId) : undefined}
     >
       {loading && !snapshot ? (
-        <div className="min-h-screen flex items-center justify-center p-6">
-          <div className="surface-card p-8 text-center max-w-sm w-full">
-            <Loader2 size={28} className="animate-spin mx-auto mb-3" style={{ color: 'var(--brand)' }} />
-            <div className="text-sm font-semibold text-zinc-900">Loading Mother&apos;s Hut Portal</div>
-            <p className="text-xs text-slate-500 mt-1">
-              Loading full guest dataset, dining groups, and upcoming birthdays...
-            </p>
+        <main className="main-container flex-1 w-full space-y-5">
+          <div className="surface-card p-6 flex items-center gap-3">
+            <Loader2 size={22} className="animate-spin shrink-0" style={{ color: 'var(--brand)' }} />
+            <div>
+              <div className="text-sm font-semibold" style={{ color: 'var(--text-dark)' }}>
+                Loading Mother&apos;s Hut Portal
+              </div>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Loading full guest dataset, dining groups, and upcoming birthdays...
+              </p>
+            </div>
           </div>
-        </div>
+          <div className="mh-skeleton-grid" aria-busy="true" aria-label="Loading dashboard">
+            <div className="mh-skeleton-card" />
+            <div className="mh-skeleton-card" />
+            <div className="mh-skeleton-card" />
+            <div className="mh-skeleton-card" />
+          </div>
+        </main>
       ) : loadError && !snapshot ? (
         <div className="min-h-screen flex items-center justify-center p-6">
           <div className="surface-card p-8 text-center max-w-md w-full space-y-3">
-            <div className="text-base font-semibold text-red-700">Failed to Connect to Server</div>
-            <p className="text-xs text-slate-600">{loadError}</p>
+            <div className="text-base font-semibold text-red-dark">Failed to Connect to Server</div>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {loadError}
+            </p>
             <button type="button" className="btn btn-brand btn-sm" onClick={() => fetchSnapshot(false)}>
               <RefreshCw size={14} /> Retry Connection
             </button>
@@ -281,59 +350,61 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'segments' && (
-              <GuestGroupsStudioPage
-                snapshot={snapshot}
-                selectedClusterId={selectedClusterId}
-                onSelectClusterId={setSelectedClusterId}
-                onLaunchSimulatedCampaign={(payload) => void dispatchSmsCampaign(payload)}
-              />
-            )}
+            <Suspense fallback={<TabLoadingFallback />}>
+              {activeTab === 'segments' && (
+                <GuestGroupsStudioPage
+                  snapshot={snapshot}
+                  selectedClusterId={selectedClusterId}
+                  onSelectClusterId={setSelectedClusterId}
+                  onLaunchSimulatedCampaign={(payload) => void dispatchSmsCampaign(payload)}
+                />
+              )}
 
-            {activeTab === 'segmentation' && (
-              <SegmentationPage snapshot={snapshot} onMessageGroup={handleMessageGroup} />
-            )}
+              {activeTab === 'segmentation' && (
+                <SegmentationPage snapshot={snapshot} onMessageGroup={handleMessageGroup} />
+              )}
 
-            {activeTab === 'customers' && (
-              <CustomersPage
-                snapshot={snapshot}
-                onInspectCustomer={(c) => setInspectedCustomer(c)}
-              />
-            )}
+              {activeTab === 'customers' && (
+                <CustomersPage
+                  snapshot={snapshot}
+                  onInspectCustomer={(c) => setInspectedCustomer(c)}
+                />
+              )}
 
-            {activeTab === 'birthday' && (
-              <BirthdayPage
-                snapshot={snapshot}
-                selectedBirthdayCustomer={selectedBirthdayCustomer}
-                onSelectBirthdayCustomer={setSelectedBirthdayCustomer}
-                onOpenOffersModal={() => setShowOffersModal(true)}
-                onSendBirthdaySms={(payload) =>
-                  void dispatchSmsCampaign({
-                    campaign_name: `Birthday Wishes — ${payload.customer_name}`,
-                    campaign_type: 'birthday',
-                    cluster_id: null,
-                    cluster_name: 'Birthday Celebration',
-                    message_content: payload.message_content,
-                    language: 'en',
-                    recipient_ids: [payload.customer_id],
-                    birthday_occurrence: payload.birthday_occurrence,
-                    offer_id: payload.offer_id,
-                    allow_resend: payload.allow_resend,
-                  })
-                }
-                onSendFilteredBirthdaySms={handleFilteredBirthdayBulkSend}
-              />
-            )}
+              {activeTab === 'birthday' && (
+                <BirthdayPage
+                  snapshot={snapshot}
+                  selectedBirthdayCustomer={selectedBirthdayCustomer}
+                  onSelectBirthdayCustomer={setSelectedBirthdayCustomer}
+                  onOpenOffersModal={() => setShowOffersModal(true)}
+                  onSendBirthdaySms={(payload) =>
+                    void dispatchSmsCampaign({
+                      campaign_name: `Birthday Wishes — ${payload.customer_name}`,
+                      campaign_type: 'birthday',
+                      cluster_id: null,
+                      cluster_name: 'Birthday Celebration',
+                      message_content: payload.message_content,
+                      language: 'en',
+                      recipient_ids: [payload.customer_id],
+                      birthday_occurrence: payload.birthday_occurrence,
+                      offer_id: payload.offer_id,
+                      allow_resend: payload.allow_resend,
+                    })
+                  }
+                  onSendFilteredBirthdaySms={handleFilteredBirthdayBulkSend}
+                />
+              )}
 
-            {activeTab === 'alerts' && (
-              <AlertsPage
-                snapshot={snapshot}
-                onOpenGuestModal={(c) => setInspectedCustomer(c)}
-                onBulkSendAlerts={handleBulkSendAlerts}
-              />
-            )}
+              {activeTab === 'alerts' && (
+                <AlertsPage
+                  snapshot={snapshot}
+                  onOpenGuestModal={(c) => setInspectedCustomer(c)}
+                  onBulkSendAlerts={handleBulkSendAlerts}
+                />
+              )}
 
-            {activeTab === 'history' && <HistoryPage snapshot={snapshot} />}
+              {activeTab === 'history' && <HistoryPage snapshot={snapshot} />}
+            </Suspense>
           </main>
 
           <footer className="app-footer">
@@ -342,55 +413,63 @@ export default function App() {
         </>
       ) : null}
 
-      {/* Guest Profile 2-Column Modal */}
-      <GuestDetailModal
-        customer={inspectedCustomer}
-        allCustomers={snapshot?.customers || []}
-        isSent={
-          inspectedCustomer
-            ? snapshot?.contacted_alert_ids.includes(inspectedCustomer.customer_id) ?? false
-            : false
-        }
-        onClose={() => setInspectedCustomer(null)}
-        onSaveCustomer={handleSaveCustomer}
-        onSendSimulatedSms={({ customer, message, language }) => {
-          const cfg = CLUSTER_CONFIG[customer.cluster_id];
-          setInspectedCustomer(null);
-          void dispatchSmsCampaign({
-            campaign_name: `Guest Follow-Up — ${customer.customer_name}`,
-            campaign_type: 'alert',
-            cluster_id: customer.cluster_id,
-            cluster_name: cfg?.name || customer.cluster_name,
-            message_content: message,
-            language,
-            recipient_ids: [customer.customer_id],
-          });
-        }}
-      />
+      {inspectedCustomer && (
+        <Suspense fallback={null}>
+          <GuestDetailModal
+            customer={inspectedCustomer}
+            allCustomers={snapshot?.customers || []}
+            isSent={
+              inspectedCustomer
+                ? snapshot?.contacted_alert_ids.includes(inspectedCustomer.customer_id) ?? false
+                : false
+            }
+            onClose={() => setInspectedCustomer(null)}
+            onSaveCustomer={handleSaveCustomer}
+            onSendSimulatedSms={({ customer, message, language }) => {
+              const cfg = CLUSTER_CONFIG[customer.cluster_id];
+              setInspectedCustomer(null);
+              void dispatchSmsCampaign({
+                campaign_name: `Guest Follow-Up — ${customer.customer_name}`,
+                campaign_type: 'alert',
+                cluster_id: customer.cluster_id,
+                cluster_name: cfg?.name || customer.cluster_name,
+                message_content: message,
+                language,
+                recipient_ids: [customer.customer_id],
+              });
+            }}
+          />
+        </Suspense>
+      )}
 
-      {/* Birthday Offer Management Modal */}
-      <BirthdayOffersModal
-        isOpen={showOffersModal}
-        offers={snapshot?.birthday_offers || []}
-        onClose={() => setShowOffersModal(false)}
-        onSaveOffer={handleSaveOffer}
-        onDeleteOffer={handleDeleteOffer}
-      />
+      {showOffersModal && (
+        <Suspense fallback={null}>
+          <BirthdayOffersModal
+            isOpen={showOffersModal}
+            offers={snapshot?.birthday_offers || []}
+            onClose={() => setShowOffersModal(false)}
+            onSaveOffer={handleSaveOffer}
+            onDeleteOffer={handleDeleteOffer}
+          />
+        </Suspense>
+      )}
 
-      {/* SMS Dispatch Progress & Results Modal */}
-      <SimulatedSmsModal
-        isOpen={smsModalOpen}
-        isSimulating={isSendingSms}
-        campaign={dispatchedCampaign}
-        errorMessage={smsError}
-        onClose={() => {
-          setSmsModalOpen(false);
-          setDispatchedCampaign(null);
-          setSmsError(null);
-        }}
-      />
+      {smsModalOpen && (
+        <Suspense fallback={null}>
+          <SimulatedSmsModal
+            isOpen={smsModalOpen}
+            isSimulating={isSendingSms}
+            campaign={dispatchedCampaign}
+            errorMessage={smsError}
+            onClose={() => {
+              setSmsModalOpen(false);
+              setDispatchedCampaign(null);
+              setSmsError(null);
+            }}
+          />
+        </Suspense>
+      )}
 
-      {/* Toast Notification */}
       {toastMsg && (
         <div className="toast" role="status" aria-live="polite">
           {toastMsg}
